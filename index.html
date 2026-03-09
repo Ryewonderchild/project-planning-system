@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>团队项目执行看板</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  </head>
+  <body class="bg-slate-50">
+    <div id="root"></div>
+
+    <script type="text/babel" data-presets="typescript,react">
+      type TaskStatus = '未开始' | '进行中' | '阻塞' | '已完成';
+      type TaskRisk = '低' | '中' | '高';
+
+      type Task = {
+        id: string;
+        title: string;
+        ownerId: string;
+        start: string;
+        end: string;
+        effort: number;
+        status: TaskStatus;
+        risk: TaskRisk;
+      };
+
+      type Member = {
+        id: string;
+        name: string;
+        role: string;
+        capacity: number;
+      };
+
+      const members: Member[] = [
+        { id: 'u1', name: '李华', role: '产品经理', capacity: 12 },
+        { id: 'u2', name: '王敏', role: '前端工程师', capacity: 15 },
+        { id: 'u3', name: '陈涛', role: '后端工程师', capacity: 16 },
+        { id: 'u4', name: '赵楠', role: '测试工程师', capacity: 10 }
+      ];
+
+      const tasks: Task[] = [
+        { id: 'T-101', title: '需求梳理与范围确认', ownerId: 'u1', start: '2026-03-03', end: '2026-03-06', effort: 4, status: '已完成', risk: '低' },
+        { id: 'T-102', title: '首页总览模块开发', ownerId: 'u2', start: '2026-03-07', end: '2026-03-12', effort: 6, status: '进行中', risk: '中' },
+        { id: 'T-103', title: '任务清单接口与状态同步', ownerId: 'u3', start: '2026-03-08', end: '2026-03-14', effort: 7, status: '进行中', risk: '低' },
+        { id: 'T-104', title: '甘特排期视图实现', ownerId: 'u2', start: '2026-03-11', end: '2026-03-18', effort: 7, status: '未开始', risk: '中' },
+        { id: 'T-105', title: '成员负荷分析与预警', ownerId: 'u3', start: '2026-03-13', end: '2026-03-20', effort: 8, status: '未开始', risk: '高' },
+        { id: 'T-106', title: '回归测试与发布验证', ownerId: 'u4', start: '2026-03-19', end: '2026-03-23', effort: 5, status: '未开始', risk: '中' }
+      ];
+
+      const pages = ['首页总览', '任务清单', '甘特排期', '成员负荷'] as const;
+      type Page = (typeof pages)[number];
+
+      const riskStyle: Record<TaskRisk, string> = {
+        低: 'bg-emerald-50 text-emerald-700',
+        中: 'bg-amber-50 text-amber-700',
+        高: 'bg-rose-50 text-rose-700'
+      };
+
+      const statusStyle: Record<TaskStatus, string> = {
+        未开始: 'bg-slate-100 text-slate-700',
+        进行中: 'bg-blue-50 text-blue-700',
+        阻塞: 'bg-red-50 text-red-700',
+        已完成: 'bg-emerald-50 text-emerald-700'
+      };
+
+      const formatDate = (date: string) => new Date(date).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+
+      function MetricCard({ label, value, hint }: { label: string; value: string; hint: string }) {
+        return (
+          <article className="rounded-xl border border-slate-200 bg-white p-4">
+            <p className="text-sm text-slate-500">{label}</p>
+            <p className="mt-2 text-2xl font-semibold text-slate-900">{value}</p>
+            <p className="mt-1 text-xs text-slate-400">{hint}</p>
+          </article>
+        );
+      }
+
+      function App() {
+        const [currentPage, setCurrentPage] = React.useState<Page>('首页总览');
+
+        const metrics = React.useMemo(() => {
+          const effortTotal = tasks.reduce((sum, task) => sum + task.effort, 0);
+          const riskyCount = tasks.filter((task) => task.risk === '高' || task.status === '阻塞').length;
+
+          const memberLoad = members.map((member) => {
+            const assigned = tasks.filter((task) => task.ownerId === member.id).reduce((sum, task) => sum + task.effort, 0);
+            const saturation = Number(((assigned / member.capacity) * 100).toFixed(1));
+            return { ...member, assigned, saturation };
+          });
+
+          return {
+            effortTotal,
+            riskyCount,
+            completed: tasks.filter((task) => task.status === '已完成').length,
+            inProgress: tasks.filter((task) => task.status === '进行中').length,
+            memberLoad
+          };
+        }, []);
+
+        const startBase = new Date(Math.min(...tasks.map((task) => new Date(task.start).getTime())));
+        const endBase = new Date(Math.max(...tasks.map((task) => new Date(task.end).getTime())));
+        const totalRange = Math.max(1, Math.ceil((endBase.getTime() - startBase.getTime()) / (1000 * 60 * 60 * 24)));
+
+        return (
+          <div className="min-h-screen text-slate-800">
+            <header className="border-b border-slate-200 bg-white">
+              <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+                <div>
+                  <h1 className="text-xl font-semibold">团队项目执行看板</h1>
+                  <p className="text-sm text-slate-500">用于管理层快速查看任务、排期、负荷与风险</p>
+                </div>
+                <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700">Sprint 03 · Mock 数据</span>
+              </div>
+            </header>
+
+            <main className="mx-auto max-w-7xl px-6 py-6">
+              <nav className="mb-6 flex flex-wrap gap-2">
+                {pages.map((page) => (
+                  <button
+                    key={page}
+                    onClick={() => setCurrentPage(page)}
+                    className={`rounded-lg border px-4 py-2 text-sm transition ${
+                      currentPage === page ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    {page}
+                  </button>
+                ))}
+              </nav>
+
+              {currentPage === '首页总览' && (
+                <section className="grid gap-4 md:grid-cols-4">
+                  <MetricCard label="项目总人天" value={`${metrics.effortTotal} 人天`} hint="自动汇总任务预估" />
+                  <MetricCard label="高风险任务" value={`${metrics.riskyCount} 项`} hint="风险高或状态阻塞" />
+                  <MetricCard label="进行中任务" value={`${metrics.inProgress} 项`} hint="当前正在推进" />
+                  <MetricCard label="已完成任务" value={`${metrics.completed} 项`} hint="已交付项" />
+                </section>
+              )}
+
+              {currentPage === '任务清单' && (
+                <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                  <table className="min-w-full divide-y divide-slate-200 text-sm">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        {['任务ID', '任务名称', '负责人', '起止时间', '人天', '状态', '风险'].map((head) => (
+                          <th key={head} className="px-4 py-3 text-left font-medium text-slate-600">{head}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {tasks.map((task) => (
+                        <tr key={task.id}>
+                          <td className="px-4 py-3 font-medium">{task.id}</td>
+                          <td className="px-4 py-3">{task.title}</td>
+                          <td className="px-4 py-3">{members.find((m) => m.id === task.ownerId)?.name}</td>
+                          <td className="px-4 py-3 text-slate-500">{formatDate(task.start)} - {formatDate(task.end)}</td>
+                          <td className="px-4 py-3">{task.effort}</td>
+                          <td className="px-4 py-3"><span className={`rounded px-2 py-1 text-xs font-medium ${statusStyle[task.status]}`}>{task.status}</span></td>
+                          <td className="px-4 py-3"><span className={`rounded px-2 py-1 text-xs font-medium ${riskStyle[task.risk]}`}>{task.risk}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </section>
+              )}
+
+              {currentPage === '甘特排期' && (
+                <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+                  {tasks.map((task) => {
+                    const startOffset = Math.ceil((new Date(task.start).getTime() - startBase.getTime()) / (1000 * 60 * 60 * 24));
+                    const duration = Math.max(1, Math.ceil((new Date(task.end).getTime() - new Date(task.start).getTime()) / (1000 * 60 * 60 * 24)));
+                    const left = (startOffset / totalRange) * 100;
+                    const width = (duration / totalRange) * 100;
+
+                    return (
+                      <div key={task.id} className="grid items-center gap-3 md:grid-cols-[220px_1fr]">
+                        <div>
+                          <p className="font-medium">{task.title}</p>
+                          <p className="text-xs text-slate-500">{formatDate(task.start)} - {formatDate(task.end)}</p>
+                        </div>
+                        <div className="relative h-8 rounded bg-slate-100">
+                          <div className="absolute top-1 h-6 rounded bg-blue-500/80 px-2 text-xs leading-6 text-white" style={{ left: `${left}%`, width: `${width}%` }}>{task.id}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </section>
+              )}
+
+              {currentPage === '成员负荷' && (
+                <section className="grid gap-4 md:grid-cols-2">
+                  {metrics.memberLoad.map((member) => (
+                    <article key={member.id} className="rounded-xl border border-slate-200 bg-white p-4">
+                      <div className="mb-2 flex items-baseline justify-between">
+                        <h3 className="font-semibold">{member.name}</h3>
+                        <p className="text-sm text-slate-500">{member.role}</p>
+                      </div>
+                      <p className="mb-2 text-sm text-slate-600">任务负荷 {member.assigned} / 可用容量 {member.capacity} 人天</p>
+                      <div className="h-3 w-full overflow-hidden rounded-full bg-slate-100">
+                        <div
+                          className={`h-full ${member.saturation > 95 ? 'bg-rose-500' : member.saturation > 80 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                          style={{ width: `${Math.min(member.saturation, 100)}%` }}
+                        />
+                      </div>
+                      <p className="mt-2 text-sm font-medium">
+                        饱和度 {member.saturation}%
+                        <span className="ml-2 text-xs text-slate-500">{member.saturation > 95 ? '超负荷' : member.saturation > 80 ? '接近饱和' : '健康'}</span>
+                      </p>
+                    </article>
+                  ))}
+                </section>
+              )}
+            </main>
+          </div>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+  </body>
+</html>
