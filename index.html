@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>团队项目执行看板</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: Inter, 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #f8fafc; color: #1e293b; }
+      .header { background: #fff; border-bottom: 1px solid #e2e8f0; }
+      .header-inner { max-width: 1280px; margin: 0 auto; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+      .container { max-width: 1280px; margin: 0 auto; padding: 24px; }
+      .tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+      .tab { border: 1px solid #cbd5e1; background: #fff; padding: 8px 14px; border-radius: 10px; cursor: pointer; }
+      .tab.active { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+      .card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:16px; }
+      .grid4 { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+      .value { font-size: 26px; font-weight:700; margin-top:8px; }
+      .muted { color:#64748b; font-size:13px; }
+      .toolbar { display:flex; gap:8px; margin-bottom:12px; align-items:center; }
+      button { border:1px solid #cbd5e1; background:#fff; border-radius:8px; padding:6px 10px; cursor:pointer; }
+      .btn-primary { background:#2563eb; border-color:#2563eb; color:#fff; }
+      table { width:100%; border-collapse: collapse; font-size:14px; }
+      th,td { border-bottom:1px solid #e2e8f0; padding:8px; text-align:left; }
+      input, select { width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:6px; background:white; }
+      .tag { padding:2px 8px; border-radius:6px; font-size:12px; display:inline-block; }
+      .st-未开始 { background:#f1f5f9; color:#475569; } .st-进行中 { background:#eff6ff; color:#1d4ed8; } .st-阻塞 { background:#fef2f2; color:#b91c1c; } .st-已完成 { background:#ecfdf5; color:#047857; }
+      .rk-低 { background:#ecfdf5; color:#047857; } .rk-中 { background:#fffbeb; color:#b45309; } .rk-高 { background:#fff1f2; color:#be123c; }
+      .gantt { overflow:auto; }
+      .gantt-grid { min-width: 980px; }
+      .g-head { display:grid; gap:6px; margin-bottom:8px; }
+      .g-row { display:grid; gap:6px; align-items:center; margin-bottom:6px; }
+      .g-label { font-size:13px; }
+      .g-cell { border:1px solid #e2e8f0; background:#fff; height:28px; position:relative; border-radius:6px; }
+      .g-bar { position:absolute; top:3px; height:20px; background:#3b82f6; color:#fff; border-radius:4px; font-size:12px; line-height:20px; padding:0 6px; overflow:hidden; white-space:nowrap; }
+      .member-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+      .progress { height:10px; background:#e2e8f0; border-radius:999px; overflow:hidden; margin-top:8px; }
+      .fill{height:100%;}
+      @media (max-width:900px){ .grid4{grid-template-columns:repeat(2,minmax(0,1fr));} .member-grid{grid-template-columns:1fr;} }
+    </style>
+  </head>
+  <body>
+    <header class="header"><div class="header-inner"><div><strong style="font-size:22px">团队项目执行看板</strong><div class="muted">支持任务/成员在线编辑，指标自动更新</div></div><span class="muted">Sprint 03 · Mock</span></div></header>
+    <main class="container">
+      <nav id="tabs" class="tabs"></nav>
+      <section id="view"></section>
+    </main>
+
+    <script>
+      const pages = ['首页总览','任务清单','甘特排期','成员负荷'];
+      let current = pages[0];
+      let members = [
+        { id:'u1', name:'李华', role:'产品经理', capacity:12 },
+        { id:'u2', name:'王敏', role:'前端工程师', capacity:15 },
+        { id:'u3', name:'陈涛', role:'后端工程师', capacity:16 },
+        { id:'u4', name:'赵楠', role:'测试工程师', capacity:10 }
+      ];
+      let tasks = [
+        { id:'T-101', title:'需求梳理与范围确认', ownerId:'u1', start:'2026-03-03', end:'2026-03-06', effort:4, status:'已完成', risk:'低' },
+        { id:'T-102', title:'首页总览模块开发', ownerId:'u2', start:'2026-03-07', end:'2026-03-12', effort:6, status:'进行中', risk:'中' },
+        { id:'T-103', title:'任务清单接口与状态同步', ownerId:'u3', start:'2026-03-08', end:'2026-03-14', effort:7, status:'进行中', risk:'低' },
+        { id:'T-104', title:'甘特排期视图实现', ownerId:'u2', start:'2026-03-11', end:'2026-03-18', effort:7, status:'未开始', risk:'中' }
+      ];
+
+      const view = document.getElementById('view');
+      const tabs = document.getElementById('tabs');
+      const fmt = (d) => new Date(d).toLocaleDateString('zh-CN',{month:'short',day:'numeric'});
+      const dayMs = 86400000;
+
+      const recalc = () => {
+        const effortTotal = tasks.reduce((s,t)=>s+(Number(t.effort)||0),0);
+        const riskyCount = tasks.filter(t=>t.risk==='高' || t.status==='阻塞').length;
+        const completed = tasks.filter(t=>t.status==='已完成').length;
+        const inProgress = tasks.filter(t=>t.status==='进行中').length;
+        const memberLoad = members.map(m=>{
+          const assigned = tasks.filter(t=>t.ownerId===m.id).reduce((s,t)=>s+(Number(t.effort)||0),0);
+          const saturation = m.capacity ? +((assigned/m.capacity)*100).toFixed(1) : 0;
+          return {...m,assigned,saturation};
+        });
+        return {effortTotal,riskyCount,completed,inProgress,memberLoad};
+      };
+
+      function renderTabs(){
+        tabs.innerHTML = pages.map(p=>`<button class="tab ${p===current?'active':''}" data-page="${p}">${p}</button>`).join('');
+        tabs.querySelectorAll('button').forEach(b=>b.onclick=()=>{ current=b.dataset.page; render(); });
+      }
+
+      function renderOverview(){
+        const m = recalc();
+        return `<div class="grid4">
+          <div class="card"><div class="muted">项目总人天</div><div class="value">${m.effortTotal}</div></div>
+          <div class="card"><div class="muted">高风险任务</div><div class="value">${m.riskyCount}</div></div>
+          <div class="card"><div class="muted">进行中任务</div><div class="value">${m.inProgress}</div></div>
+          <div class="card"><div class="muted">已完成任务</div><div class="value">${m.completed}</div></div>
+        </div>`;
+      }
+
+      function renderTaskEditor(){
+        return `<div class="card">
+          <div class="toolbar"><button class="btn-primary" id="addTask">+ 新增任务</button><span class="muted">可直接编辑单元格</span></div>
+          <table><thead><tr><th>ID</th><th>任务</th><th>负责人</th><th>开始</th><th>结束</th><th>人天</th><th>状态</th><th>风险</th><th>操作</th></tr></thead>
+            <tbody>${tasks.map((t,i)=>`<tr>
+              <td><input data-f="id" data-i="${i}" value="${t.id}"></td>
+              <td><input data-f="title" data-i="${i}" value="${t.title}"></td>
+              <td><select data-f="ownerId" data-i="${i}">${members.map(m=>`<option value="${m.id}" ${m.id===t.ownerId?'selected':''}>${m.name}</option>`).join('')}</select></td>
+              <td><input type="date" data-f="start" data-i="${i}" value="${t.start}"></td>
+              <td><input type="date" data-f="end" data-i="${i}" value="${t.end}"></td>
+              <td><input type="number" min="0" step="0.5" data-f="effort" data-i="${i}" value="${t.effort}"></td>
+              <td><select data-f="status" data-i="${i}">${['未开始','进行中','阻塞','已完成'].map(s=>`<option ${s===t.status?'selected':''}>${s}</option>`).join('')}</select></td>
+              <td><select data-f="risk" data-i="${i}">${['低','中','高'].map(r=>`<option ${r===t.risk?'selected':''}>${r}</option>`).join('')}</select></td>
+              <td><button data-del-task="${i}">删除</button></td>
+            </tr>`).join('')}</tbody>
+          </table>
+        </div>`;
+      }
+
+      function renderMemberEditor(){
+        return `<div class="card" style="margin-bottom:12px;">
+          <div class="toolbar"><button class="btn-primary" id="addMember">+ 新增成员</button><span class="muted">成员编辑会同步影响负荷与任务负责人下拉</span></div>
+          <table><thead><tr><th>ID</th><th>姓名</th><th>角色</th><th>容量(人天)</th><th>操作</th></tr></thead>
+            <tbody>${members.map((m,i)=>`<tr>
+              <td><input data-mf="id" data-mi="${i}" value="${m.id}"></td>
+              <td><input data-mf="name" data-mi="${i}" value="${m.name}"></td>
+              <td><input data-mf="role" data-mi="${i}" value="${m.role}"></td>
+              <td><input type="number" min="0" step="0.5" data-mf="capacity" data-mi="${i}" value="${m.capacity}"></td>
+              <td><button data-del-member="${i}">删除</button></td>
+            </tr>`).join('')}</tbody>
+          </table>
+        </div>`;
+      }
+
+      function renderGantt(){
+        if (!tasks.length) return '<div class="card">暂无任务</div>';
+        const valid = tasks.filter(t=>t.start && t.end);
+        const min = new Date(Math.min(...valid.map(t=>new Date(t.start).getTime())));
+        const max = new Date(Math.max(...valid.map(t=>new Date(t.end).getTime())));
+        const days = Math.max(1, Math.ceil((max-min)/dayMs)+1);
+        const cols = `240px repeat(${days}, minmax(28px,1fr))`;
+        const headDates = Array.from({length:days}).map((_,i)=>new Date(min.getTime()+i*dayMs));
+
+        let rows = valid.map(t=>{
+          const s = new Date(t.start), e = new Date(t.end);
+          const start = Math.floor((s-min)/dayMs)+1;
+          const span = Math.max(1, Math.floor((e-s)/dayMs)+1);
+          return `<div class="g-row" style="grid-template-columns:${cols}">
+            <div class="g-label"><strong>${t.id}</strong> ${t.title}<div class="muted">${fmt(t.start)} - ${fmt(t.end)}</div></div>
+            <div class="g-cell" style="grid-column:${start+1}/span ${span}"><div class="g-bar">${t.id}</div></div>
+          </div>`;
+        }).join('');
+
+        return `<div class="card gantt"><div class="gantt-grid">
+          <div class="g-head" style="grid-template-columns:${cols}">
+            <div class="muted">任务 / 日期</div>
+            ${headDates.map(d=>`<div class="muted" style="text-align:center">${d.getMonth()+1}/${d.getDate()}</div>`).join('')}
+          </div>${rows}</div></div>`;
+      }
+
+      function renderMemberLoad(){
+        const m = recalc();
+        return `${renderMemberEditor()}<div class="member-grid">${m.memberLoad.map(x=>{
+          const color = x.saturation>95?'#ef4444':x.saturation>80?'#f59e0b':'#10b981';
+          const state = x.saturation>95?'超负荷':x.saturation>80?'接近饱和':'健康';
+          return `<div class="card"><strong>${x.name}</strong> <span class="muted">${x.role}</span>
+            <div class="muted" style="margin-top:6px">任务负荷 ${x.assigned} / 容量 ${x.capacity}</div>
+            <div class="progress"><div class="fill" style="width:${Math.min(x.saturation,100)}%;background:${color}"></div></div>
+            <div style="margin-top:6px">饱和度 ${x.saturation}% <span class="muted">${state}</span></div></div>`;
+        }).join('')}</div>`;
+      }
+
+      function bindEditors(){
+        document.getElementById('addTask')?.addEventListener('click', ()=>{
+          tasks.push({id:`T-${100+tasks.length+1}`,title:'新任务',ownerId:members[0]?.id||'',start:'2026-03-10',end:'2026-03-12',effort:2,status:'未开始',risk:'低'});
+          render();
+        });
+        document.querySelectorAll('[data-del-task]').forEach(b=>b.onclick=()=>{ tasks.splice(+b.dataset.delTask,1); render(); });
+        document.querySelectorAll('[data-f]').forEach(el=>el.addEventListener('change',e=>{
+          const i=+e.target.dataset.i, f=e.target.dataset.f; tasks[i][f]= f==='effort' ? Number(e.target.value) : e.target.value; render();
+        }));
+
+        document.getElementById('addMember')?.addEventListener('click', ()=>{
+          members.push({id:`u${members.length+1}`,name:'新成员',role:'工程师',capacity:10}); render();
+        });
+        document.querySelectorAll('[data-del-member]').forEach(b=>b.onclick=()=>{ const i=+b.dataset.delMember; const removed=members[i]; members.splice(i,1); tasks=tasks.map(t=>t.ownerId===removed?.id?{...t,ownerId:members[0]?.id||''}:t); render(); });
+        document.querySelectorAll('[data-mf]').forEach(el=>el.addEventListener('change',e=>{
+          const i=+e.target.dataset.mi, f=e.target.dataset.mf; members[i][f]= f==='capacity'? Number(e.target.value):e.target.value; render();
+        }));
+      }
+
+      function render(){
+        renderTabs();
+        if (current==='首页总览') view.innerHTML = renderOverview();
+        if (current==='任务清单') view.innerHTML = renderTaskEditor();
+        if (current==='甘特排期') view.innerHTML = renderGantt();
+        if (current==='成员负荷') view.innerHTML = renderMemberLoad();
+        bindEditors();
+      }
+      render();
+    </script>
+  </body>
+</html>
