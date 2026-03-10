@@ -92,6 +92,25 @@
       const fmt = (d) => new Date(d).toLocaleDateString('zh-CN',{month:'short',day:'numeric'});
       const fmtTs = (d) => new Date(d).toLocaleString('zh-CN');
       const dayMs = 86400000;
+      function dateRangeInclusive(start, end) {
+        if (!start || !end) return [];
+        const s = new Date(start), e = new Date(end);
+        if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime()) || e < s) return [];
+        const out = [];
+        for (let t = s.getTime(); t <= e.getTime(); t += dayMs) {
+          out.push(new Date(t));
+        }
+        return out;
+      }
+
+      function computeTaskEffort(task) {
+        return dateRangeInclusive(task.start, task.end).length;
+      }
+
+      function syncTaskEfforts() {
+        tasks = tasks.map((t) => ({ ...t, effort: computeTaskEffort(t) }));
+      }
+
 
       function snapshotData() { return { members, tasks }; }
 
@@ -154,14 +173,35 @@
       }
 
       const recalc = () => {
+        syncTaskEfforts();
         const effortTotal = tasks.reduce((s,t)=>s+(Number(t.effort)||0),0);
         const riskyCount = tasks.filter(t=>t.risk==='高' || t.status==='阻塞').length;
         const completed = tasks.filter(t=>t.status==='已完成').length;
         const inProgress = tasks.filter(t=>t.status==='进行中').length;
+
+        const validTasks = tasks.filter((t) => t.start && t.end);
+        const allDates = validTasks.flatMap((t) => dateRangeInclusive(t.start, t.end).map((d) => d.toISOString().slice(0,10)));
+        const projectDays = new Set(allDates).size || 1;
+
         const memberLoad = members.map(m=>{
-          const assigned = tasks.filter(t=>t.ownerId===m.id).reduce((s,t)=>s+(Number(t.effort)||0),0);
-          const saturation = m.capacity ? +((assigned/m.capacity)*100).toFixed(1) : 0;
-          return {...m,assigned,saturation};
+          const owned = tasks.filter(t=>t.ownerId===m.id);
+          const assigned = owned.reduce((s,t)=>s+(Number(t.effort)||0),0);
+
+          const daily = {};
+          for (const t of owned) {
+            for (const d of dateRangeInclusive(t.start, t.end)) {
+              const key = d.toISOString().slice(0,10);
+              daily[key] = (daily[key] || 0) + 1;
+            }
+          }
+
+          const peakDailyLoad = Math.max(0, ...Object.values(daily));
+          const capacityPerDay = Number(m.capacity) || 0;
+          const avgSaturation = capacityPerDay ? +((assigned / (capacityPerDay * projectDays)) * 100).toFixed(1) : 0;
+          const peakSaturation = capacityPerDay ? +((peakDailyLoad / capacityPerDay) * 100).toFixed(1) : 0;
+          const overloadDays = Object.values(daily).filter((v) => capacityPerDay > 0 && v > capacityPerDay).length;
+
+          return {...m,assigned,saturation:avgSaturation,peakSaturation,overloadDays,peakDailyLoad,projectDays};
         });
         return {effortTotal,riskyCount,completed,inProgress,memberLoad};
       };
@@ -184,14 +224,14 @@
       function renderTaskEditor(){
         return `<div class="card">
           <div class="toolbar"><button class="btn-primary" id="addTask">+ 新增任务</button><span class="muted">可直接编辑单元格（会自动保存）</span></div>
-          <table><thead><tr><th>ID</th><th>任务</th><th>负责人</th><th>开始</th><th>结束</th><th>人天</th><th>状态</th><th>风险</th><th>操作</th></tr></thead>
+          <table><thead><tr><th>ID</th><th>任务</th><th>负责人</th><th>开始</th><th>结束</th><th>人天(自动)</th><th>状态</th><th>风险</th><th>操作</th></tr></thead>
             <tbody>${tasks.map((t,i)=>`<tr>
               <td><input data-f="id" data-i="${i}" value="${t.id}"></td>
               <td><input data-f="title" data-i="${i}" value="${t.title}"></td>
               <td><select data-f="ownerId" data-i="${i}">${members.map(m=>`<option value="${m.id}" ${m.id===t.ownerId?'selected':''}>${m.name}</option>`).join('')}</select></td>
               <td><input type="date" data-f="start" data-i="${i}" value="${t.start}"></td>
               <td><input type="date" data-f="end" data-i="${i}" value="${t.end}"></td>
-              <td><input type="number" min="0" step="0.5" data-f="effort" data-i="${i}" value="${t.effort}"></td>
+              <td><input value="${computeTaskEffort(t)}" readonly title="按开始/结束日期自动计算"></td>
               <td><select data-f="status" data-i="${i}">${['未开始','进行中','阻塞','已完成'].map(s=>`<option ${s===t.status?'selected':''}>${s}</option>`).join('')}</select></td>
               <td><select data-f="risk" data-i="${i}">${['低','中','高'].map(r=>`<option ${r===t.risk?'selected':''}>${r}</option>`).join('')}</select></td>
               <td><button data-del-task="${i}">删除</button></td>
@@ -243,9 +283,9 @@
       function renderMemberLoad(){
         const m = recalc();
         return `${renderMemberEditor()}<div class="member-grid">${m.memberLoad.map(x=>{
-          const color = x.saturation>95?'#ef4444':x.saturation>80?'#f59e0b':'#10b981';
-          const state = x.saturation>95?'超负荷':x.saturation>80?'接近饱和':'健康';
-          return `<div class="card"><strong>${x.name}</strong> <span class="muted">${x.role}</span><div class="muted" style="margin-top:6px">任务负荷 ${x.assigned} / 容量 ${x.capacity}</div><div class="progress"><div class="fill" style="width:${Math.min(x.saturation,100)}%;background:${color}"></div></div><div style="margin-top:6px">饱和度 ${x.saturation}% <span class="muted">${state}</span></div></div>`;
+          const color = x.peakSaturation>100?'#ef4444':x.peakSaturation>80?'#f59e0b':'#10b981';
+          const state = x.peakSaturation>100?'超负荷':x.peakSaturation>80?'接近饱和':'健康';
+          return `<div class="card"><strong>${x.name}</strong> <span class="muted">${x.role}</span><div class="muted" style="margin-top:6px">区间总人天 ${x.assigned}（按日期自动）</div><div class="muted" style="margin-top:4px">日容量 ${x.capacity}，区间 ${x.projectDays} 天，峰值日负荷 ${x.peakDailyLoad}</div><div class="progress"><div class="fill" style="width:${Math.min(x.peakSaturation,100)}%;background:${color}"></div></div><div style="margin-top:6px">平均饱和度 ${x.saturation}% / 峰值饱和度 ${x.peakSaturation}% <span class="muted">${state}，超载天数 ${x.overloadDays}</span></div></div>`;
         }).join('')}</div>`;
       }
 
@@ -256,9 +296,9 @@
       }
 
       function bindEditors(){
-        document.getElementById('addTask')?.addEventListener('click', ()=>applyMutation(()=>{ tasks.push({id:`T-${100+tasks.length+1}`,title:'新任务',ownerId:members[0]?.id||'',start:'2026-03-10',end:'2026-03-12',effort:2,status:'未开始',risk:'低'}); }));
+        document.getElementById('addTask')?.addEventListener('click', ()=>applyMutation(()=>{ tasks.push({id:`T-${100+tasks.length+1}`,title:'新任务',ownerId:members[0]?.id||'',start:'2026-03-10',end:'2026-03-12',effort:0,status:'未开始',risk:'低'}); }));
         document.querySelectorAll('[data-del-task]').forEach(b=>b.onclick=()=>applyMutation(()=>{ tasks.splice(+b.dataset.delTask,1); }));
-        document.querySelectorAll('[data-f]').forEach(el=>el.addEventListener('change',e=>applyMutation(()=>{ const i=+e.target.dataset.i, f=e.target.dataset.f; tasks[i][f]= f==='effort' ? Number(e.target.value) : e.target.value; })));
+        document.querySelectorAll('[data-f]').forEach(el=>el.addEventListener('change',e=>applyMutation(()=>{ const i=+e.target.dataset.i, f=e.target.dataset.f; tasks[i][f]= e.target.value; })));
 
         document.getElementById('addMember')?.addEventListener('click', ()=>applyMutation(()=>{ members.push({id:`u${members.length+1}`,name:'新成员',role:'工程师',capacity:10}); }));
         document.querySelectorAll('[data-del-member]').forEach(b=>b.onclick=()=>applyMutation(()=>{ const i=+b.dataset.delMember; const removed=members[i]; members.splice(i,1); tasks=tasks.map(t=>t.ownerId===removed?.id?{...t,ownerId:members[0]?.id||''}:t); }));
