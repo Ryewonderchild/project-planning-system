@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>团队项目执行看板</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: Inter, 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #f8fafc; color: #1e293b; }
+      .header { background: #fff; border-bottom: 1px solid #e2e8f0; }
+      .header-inner { max-width: 1280px; margin: 0 auto; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; gap:12px; }
+      .container { max-width: 1280px; margin: 0 auto; padding: 24px; }
+      .tabs { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+      .tab { border: 1px solid #cbd5e1; background: #fff; padding: 8px 14px; border-radius: 10px; cursor: pointer; }
+      .tab.active { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+      .card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:16px; }
+      .grid4 { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+      .value { font-size: 26px; font-weight:700; margin-top:8px; }
+      .muted { color:#64748b; font-size:13px; }
+      .toolbar { display:flex; gap:8px; margin-bottom:12px; align-items:center; flex-wrap:wrap; }
+      button { border:1px solid #cbd5e1; background:#fff; border-radius:8px; padding:6px 10px; cursor:pointer; }
+      .btn-primary { background:#2563eb; border-color:#2563eb; color:#fff; }
+      .btn-success { background:#059669; border-color:#059669; color:#fff; }
+      table { width:100%; border-collapse: collapse; font-size:14px; }
+      th,td { border-bottom:1px solid #e2e8f0; padding:8px; text-align:left; }
+      input, select { width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:6px; background:white; }
+      .gantt { overflow:auto; }
+      .gantt-grid { min-width: 980px; }
+      .g-head { display:grid; gap:6px; margin-bottom:8px; }
+      .g-row { display:grid; gap:6px; align-items:center; margin-bottom:6px; }
+      .g-label { font-size:13px; }
+      .g-cell { border:1px solid #e2e8f0; background:#fff; height:28px; position:relative; border-radius:6px; }
+      .g-bar { position:absolute; top:3px; height:20px; background:#3b82f6; color:#fff; border-radius:4px; font-size:12px; line-height:20px; padding:0 6px; overflow:hidden; white-space:nowrap; }
+      .member-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+      .progress { height:10px; background:#e2e8f0; border-radius:999px; overflow:hidden; margin-top:8px; }
+      .fill{height:100%;}
+      .archive-list { max-height: 170px; overflow: auto; border:1px solid #e2e8f0; border-radius:8px; }
+      .archive-item { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px; border-bottom:1px solid #f1f5f9; }
+      @media (max-width:900px){ .grid4{grid-template-columns:repeat(2,minmax(0,1fr));} .member-grid{grid-template-columns:1fr;} }
+    </style>
+  </head>
+  <body>
+    <header class="header">
+      <div class="header-inner">
+        <div>
+          <strong style="font-size:22px">团队项目执行看板</strong>
+          <div class="muted">支持编辑 + 留档（自动保存、本地快照、JSON 文件导入导出）</div>
+        </div>
+        <span class="muted" id="lastSaved">尚未保存</span>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="card" style="margin-bottom:12px;">
+        <div class="toolbar">
+          <button class="btn-success" id="saveNow">立即保存</button>
+          <button id="createArchive">创建留档快照</button>
+          <button id="exportDb">导出本地数据库(JSON)</button>
+          <button id="importDb">导入数据库(JSON)</button>
+          <input id="importFile" type="file" accept="application/json" style="display:none" />
+          <span class="muted">已启用自动保存</span>
+        </div>
+        <div class="archive-list" id="archiveList"></div>
+      </section>
+
+      <nav id="tabs" class="tabs"></nav>
+      <section id="view"></section>
+    </main>
+
+    <script>
+      const STORAGE_KEY = 'pps_db_v1';
+      const ARCHIVE_KEY = 'pps_archive_v1';
+      const pages = ['首页总览','任务清单','甘特排期','成员负荷'];
+      let current = pages[0];
+      let members = [
+        { id:'u1', name:'李华', role:'产品经理', capacity:12 },
+        { id:'u2', name:'王敏', role:'前端工程师', capacity:15 },
+        { id:'u3', name:'陈涛', role:'后端工程师', capacity:16 },
+        { id:'u4', name:'赵楠', role:'测试工程师', capacity:10 }
+      ];
+      let tasks = [
+        { id:'T-101', title:'需求梳理与范围确认', ownerId:'u1', start:'2026-03-03', end:'2026-03-06', effort:4, status:'已完成', risk:'低' },
+        { id:'T-102', title:'首页总览模块开发', ownerId:'u2', start:'2026-03-07', end:'2026-03-12', effort:6, status:'进行中', risk:'中' },
+        { id:'T-103', title:'任务清单接口与状态同步', ownerId:'u3', start:'2026-03-08', end:'2026-03-14', effort:7, status:'进行中', risk:'低' },
+        { id:'T-104', title:'甘特排期视图实现', ownerId:'u2', start:'2026-03-11', end:'2026-03-18', effort:7, status:'未开始', risk:'中' }
+      ];
+
+      const view = document.getElementById('view');
+      const tabs = document.getElementById('tabs');
+      const archiveListEl = document.getElementById('archiveList');
+      const lastSavedEl = document.getElementById('lastSaved');
+      const fmt = (d) => new Date(d).toLocaleDateString('zh-CN',{month:'short',day:'numeric'});
+      const fmtTs = (d) => new Date(d).toLocaleString('zh-CN');
+      const dayMs = 86400000;
+      function dateRangeInclusive(start, end) {
+        if (!start || !end) return [];
+        const s = new Date(start), e = new Date(end);
+        if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime()) || e < s) return [];
+        const out = [];
+        for (let t = s.getTime(); t <= e.getTime(); t += dayMs) {
+          out.push(new Date(t));
+        }
+        return out;
+      }
+
+      function computeTaskEffort(task) {
+        return dateRangeInclusive(task.start, task.end).length;
+      }
+
+      function syncTaskEfforts() {
+        tasks = tasks.map((t) => ({ ...t, effort: computeTaskEffort(t) }));
+      }
+
+
+      function sortTasksById() {
+        const idNum = (id) => {
+          const m = String(id || '').match(/(\d+)/);
+          return m ? Number(m[1]) : Number.MAX_SAFE_INTEGER;
+        };
+        tasks.sort((a, b) => {
+          const diff = idNum(a.id) - idNum(b.id);
+          if (diff !== 0) return diff;
+          return String(a.id || '').localeCompare(String(b.id || ''));
+        });
+      }
+
+      const ownerPalette = ['#2563eb', '#7c3aed', '#0f766e', '#b45309', '#be123c', '#4338ca', '#0e7490', '#15803d'];
+      function ownerColor(ownerId) {
+        const idx = Math.max(0, members.findIndex((m) => m.id === ownerId));
+        return ownerPalette[idx % ownerPalette.length];
+      }
+
+
+      function snapshotData() { return { members, tasks }; }
+
+      function saveToLocalStorage() {
+        sortTasksById();
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshotData()));
+        lastSavedEl.textContent = `已保存：${fmtTs(Date.now())}`;
+      }
+
+      function loadFromLocalStorage() {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+        try {
+          const data = JSON.parse(raw);
+          if (Array.isArray(data.members) && Array.isArray(data.tasks)) {
+            members = data.members;
+            tasks = data.tasks;
+            lastSavedEl.textContent = `已加载：${fmtTs(Date.now())}`;
+          }
+        } catch (_) {}
+      }
+
+      function getArchives() {
+        const raw = localStorage.getItem(ARCHIVE_KEY);
+        if (!raw) return [];
+        try { return JSON.parse(raw); } catch (_) { return []; }
+      }
+
+      function setArchives(items) {
+        localStorage.setItem(ARCHIVE_KEY, JSON.stringify(items.slice(0, 50)));
+      }
+
+      function createArchive() {
+        const archives = getArchives();
+        archives.unshift({ id: `${Date.now()}`, createdAt: Date.now(), data: snapshotData() });
+        setArchives(archives);
+        renderArchiveList();
+      }
+
+      function restoreArchive(id) {
+        const item = getArchives().find((x) => x.id === id);
+        if (!item) return;
+        members = item.data.members || [];
+        tasks = item.data.tasks || [];
+        saveToLocalStorage();
+        render();
+      }
+
+      function deleteArchive(id) {
+        setArchives(getArchives().filter((x) => x.id !== id));
+        renderArchiveList();
+      }
+
+      function renderArchiveList() {
+        const archives = getArchives();
+        archiveListEl.innerHTML = archives.length
+          ? archives.map((a) => `<div class="archive-item"><span class="muted">${fmtTs(a.createdAt)} · 任务${a.data.tasks?.length||0} · 成员${a.data.members?.length||0}</span><span><button data-restore="${a.id}">恢复</button> <button data-del-arc="${a.id}">删除</button></span></div>`).join('')
+          : '<div class="archive-item"><span class="muted">暂无留档快照</span></div>';
+        archiveListEl.querySelectorAll('[data-restore]').forEach((b)=>b.onclick=()=>restoreArchive(b.dataset.restore));
+        archiveListEl.querySelectorAll('[data-del-arc]').forEach((b)=>b.onclick=()=>deleteArchive(b.dataset.delArc));
+      }
+
+      const recalc = () => {
+        syncTaskEfforts();
+        const effortTotal = tasks.reduce((s,t)=>s+(Number(t.effort)||0),0);
+        const riskyCount = tasks.filter(t=>t.risk==='高' || t.status==='阻塞').length;
+        const completed = tasks.filter(t=>t.status==='已完成').length;
+        const inProgress = tasks.filter(t=>t.status==='进行中').length;
+
+        const validTasks = tasks.filter((t) => t.start && t.end);
+        const allDates = validTasks.flatMap((t) => dateRangeInclusive(t.start, t.end).map((d) => d.toISOString().slice(0,10)));
+        const projectDays = new Set(allDates).size || 1;
+
+        const memberLoad = members.map(m=>{
+          const owned = tasks.filter(t=>t.ownerId===m.id);
+          const assigned = owned.reduce((s,t)=>s+(Number(t.effort)||0),0);
+
+          const daily = {};
+          for (const t of owned) {
+            for (const d of dateRangeInclusive(t.start, t.end)) {
+              const key = d.toISOString().slice(0,10);
+              daily[key] = (daily[key] || 0) + 1;
+            }
+          }
+
+          const peakDailyLoad = Math.max(0, ...Object.values(daily));
+          const capacityPerDay = Number(m.capacity) || 0;
+          const avgSaturation = capacityPerDay ? +((assigned / (capacityPerDay * projectDays)) * 100).toFixed(1) : 0;
+          const peakSaturation = capacityPerDay ? +((peakDailyLoad / capacityPerDay) * 100).toFixed(1) : 0;
+          const overloadDays = Object.values(daily).filter((v) => capacityPerDay > 0 && v > capacityPerDay).length;
+
+          return {...m,assigned,saturation:avgSaturation,peakSaturation,overloadDays,peakDailyLoad,projectDays};
+        });
+        return {effortTotal,riskyCount,completed,inProgress,memberLoad};
+      };
+
+      function renderTabs(){
+        tabs.innerHTML = pages.map(p=>`<button class="tab ${p===current?'active':''}" data-page="${p}">${p}</button>`).join('');
+        tabs.querySelectorAll('button').forEach(b=>b.onclick=()=>{ current=b.dataset.page; render(); });
+      }
+
+      function renderOverview(){
+        const m = recalc();
+        return `<div class="grid4">
+          <div class="card"><div class="muted">项目总人天</div><div class="value">${m.effortTotal}</div></div>
+          <div class="card"><div class="muted">高风险任务</div><div class="value">${m.riskyCount}</div></div>
+          <div class="card"><div class="muted">进行中任务</div><div class="value">${m.inProgress}</div></div>
+          <div class="card"><div class="muted">已完成任务</div><div class="value">${m.completed}</div></div>
+        </div>`;
+      }
+
+      function renderTaskEditor(){
+        return `<div class="card">
+          <div class="toolbar"><button class="btn-primary" id="addTask">+ 新增任务</button><span class="muted">可直接编辑单元格（会自动保存）</span></div>
+          <table><thead><tr><th>ID</th><th>任务</th><th>负责人</th><th>开始</th><th>结束</th><th>人天(自动)</th><th>状态</th><th>风险</th><th>操作</th></tr></thead>
+            <tbody>${tasks.map((t,i)=>`<tr>
+              <td><input data-f="id" data-i="${i}" value="${t.id}"></td>
+              <td><input data-f="title" data-i="${i}" value="${t.title}"></td>
+              <td><select data-f="ownerId" data-i="${i}">${members.map(m=>`<option value="${m.id}" ${m.id===t.ownerId?'selected':''}>${m.name}</option>`).join('')}</select></td>
+              <td><input type="date" data-f="start" data-i="${i}" value="${t.start}"></td>
+              <td><input type="date" data-f="end" data-i="${i}" value="${t.end}"></td>
+              <td><input value="${computeTaskEffort(t)}" readonly title="按开始/结束日期自动计算"></td>
+              <td><select data-f="status" data-i="${i}">${['未开始','进行中','阻塞','已完成'].map(s=>`<option ${s===t.status?'selected':''}>${s}</option>`).join('')}</select></td>
+              <td><select data-f="risk" data-i="${i}">${['低','中','高'].map(r=>`<option ${r===t.risk?'selected':''}>${r}</option>`).join('')}</select></td>
+              <td><button data-del-task="${i}">删除</button></td>
+            </tr>`).join('')}</tbody>
+          </table>
+        </div>`;
+      }
+
+      function renderMemberEditor(){
+        return `<div class="card" style="margin-bottom:12px;">
+          <div class="toolbar"><button class="btn-primary" id="addMember">+ 新增成员</button><span class="muted">成员编辑会同步影响负荷与负责人（会自动保存）</span></div>
+          <table><thead><tr><th>ID</th><th>姓名</th><th>角色</th><th>容量(人天)</th><th>操作</th></tr></thead>
+            <tbody>${members.map((m,i)=>`<tr>
+              <td><input data-mf="id" data-mi="${i}" value="${m.id}"></td>
+              <td><input data-mf="name" data-mi="${i}" value="${m.name}"></td>
+              <td><input data-mf="role" data-mi="${i}" value="${m.role}"></td>
+              <td><input type="number" min="0" step="0.5" data-mf="capacity" data-mi="${i}" value="${m.capacity}"></td>
+              <td><button data-del-member="${i}">删除</button></td>
+            </tr>`).join('')}</tbody>
+          </table>
+        </div>`;
+      }
+
+      function renderGantt(){
+        if (!tasks.length) return '<div class="card">暂无任务</div>';
+        const valid = tasks.filter(t=>t.start && t.end);
+        if (!valid.length) return '<div class="card">任务日期不完整</div>';
+        const min = new Date(Math.min(...valid.map(t=>new Date(t.start).getTime())));
+        const max = new Date(Math.max(...valid.map(t=>new Date(t.end).getTime())));
+        const days = Math.max(1, Math.ceil((max-min)/dayMs)+1);
+        const cols = `240px repeat(${days}, minmax(28px,1fr))`;
+        const headDates = Array.from({length:days}).map((_,i)=>new Date(min.getTime()+i*dayMs));
+
+        const rows = valid.map(t=>{
+          const s = new Date(t.start), e = new Date(t.end);
+          const start = Math.floor((s-min)/dayMs)+1;
+          const span = Math.max(1, Math.floor((e-s)/dayMs)+1);
+          return `<div class="g-row" style="grid-template-columns:${cols}">
+            <div class="g-label"><strong>${t.id}</strong> ${t.title}<div class="muted">${fmt(t.start)} - ${fmt(t.end)}</div></div>
+            <div class="g-cell" style="grid-column:${start+1}/span ${span}"><div class="g-bar" style="background:${ownerColor(t.ownerId)}">${t.id} · ${members.find((m)=>m.id===t.ownerId)?.name || "未分配"}</div></div>
+          </div>`;
+        }).join('');
+
+        return `<div class="card gantt"><div class="gantt-grid">
+          <div class="g-head" style="grid-template-columns:${cols}"><div class="muted">任务 / 日期</div>${headDates.map(d=>`<div class="muted" style="text-align:center">${d.getMonth()+1}/${d.getDate()}</div>`).join('')}</div>
+          ${rows}</div></div>`;
+      }
+
+      function renderMemberLoad(){
+        const m = recalc();
+        return `${renderMemberEditor()}<div class="member-grid">${m.memberLoad.map(x=>{
+          const color = x.peakSaturation>100?'#ef4444':x.peakSaturation>80?'#f59e0b':'#10b981';
+          const state = x.peakSaturation>100?'超负荷':x.peakSaturation>80?'接近饱和':'健康';
+          return `<div class="card"><strong>${x.name}</strong> <span class="muted">${x.role}</span><div class="muted" style="margin-top:6px">区间总人天 ${x.assigned}（按日期自动）</div><div class="muted" style="margin-top:4px">日容量 ${x.capacity}，区间 ${x.projectDays} 天，峰值日负荷 ${x.peakDailyLoad}</div><div class="progress"><div class="fill" style="width:${Math.min(x.peakSaturation,100)}%;background:${color}"></div></div><div style="margin-top:6px">平均饱和度 ${x.saturation}% / 峰值饱和度 ${x.peakSaturation}% <span class="muted">${state}，超载天数 ${x.overloadDays}</span></div></div>`;
+        }).join('')}</div>`;
+      }
+
+      function applyMutation(mutator) {
+        mutator();
+        saveToLocalStorage();
+        render();
+      }
+
+      function bindEditors(){
+        document.getElementById('addTask')?.addEventListener('click', ()=>applyMutation(()=>{ tasks.push({id:`T-${100+tasks.length+1}`,title:'新任务',ownerId:members[0]?.id||'',start:'2026-03-10',end:'2026-03-12',effort:0,status:'未开始',risk:'低'}); }));
+        document.querySelectorAll('[data-del-task]').forEach(b=>b.onclick=()=>applyMutation(()=>{ tasks.splice(+b.dataset.delTask,1); }));
+        document.querySelectorAll('[data-f]').forEach(el=>el.addEventListener('change',e=>applyMutation(()=>{ const i=+e.target.dataset.i, f=e.target.dataset.f; tasks[i][f]= e.target.value; })));
+
+        document.getElementById('addMember')?.addEventListener('click', ()=>applyMutation(()=>{ members.push({id:`u${members.length+1}`,name:'新成员',role:'工程师',capacity:10}); }));
+        document.querySelectorAll('[data-del-member]').forEach(b=>b.onclick=()=>applyMutation(()=>{ const i=+b.dataset.delMember; const removed=members[i]; members.splice(i,1); tasks=tasks.map(t=>t.ownerId===removed?.id?{...t,ownerId:members[0]?.id||''}:t); }));
+        document.querySelectorAll('[data-mf]').forEach(el=>el.addEventListener('change',e=>applyMutation(()=>{ const i=+e.target.dataset.mi, f=e.target.dataset.mf; members[i][f]= f==='capacity'? Number(e.target.value):e.target.value; })));
+      }
+
+      function bindDataControls() {
+        document.getElementById('saveNow').onclick = () => { saveToLocalStorage(); render(); };
+        document.getElementById('createArchive').onclick = () => createArchive();
+        document.getElementById('exportDb').onclick = () => {
+          const payload = { exportedAt: Date.now(), ...snapshotData(), archives: getArchives() };
+          const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = `pps-db-${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.json`;
+          a.click();
+          URL.revokeObjectURL(a.href);
+        };
+        document.getElementById('importDb').onclick = () => document.getElementById('importFile').click();
+        document.getElementById('importFile').onchange = async (ev) => {
+          const file = ev.target.files?.[0];
+          if (!file) return;
+          const text = await file.text();
+          try {
+            const data = JSON.parse(text);
+            if (!Array.isArray(data.members) || !Array.isArray(data.tasks)) throw new Error('invalid');
+            members = data.members;
+            tasks = data.tasks;
+            if (Array.isArray(data.archives)) setArchives(data.archives);
+            saveToLocalStorage();
+            render();
+            alert('导入成功');
+          } catch (_) { alert('导入失败：JSON 格式不正确'); }
+          ev.target.value = '';
+        };
+      }
+
+      function render(){
+        renderTabs();
+        if (current==='首页总览') view.innerHTML = renderOverview();
+        if (current==='任务清单') view.innerHTML = renderTaskEditor();
+        if (current==='甘特排期') view.innerHTML = renderGantt();
+        if (current==='成员负荷') view.innerHTML = renderMemberLoad();
+        bindEditors();
+        renderArchiveList();
+      }
+
+      loadFromLocalStorage();
+      sortTasksById();
+      bindDataControls();
+      render();
+    </script>
+  </body>
+</html>
