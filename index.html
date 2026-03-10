@@ -112,9 +112,29 @@
       }
 
 
+      function sortTasksById() {
+        const idNum = (id) => {
+          const m = String(id || '').match(/(\d+)/);
+          return m ? Number(m[1]) : Number.MAX_SAFE_INTEGER;
+        };
+        tasks.sort((a, b) => {
+          const diff = idNum(a.id) - idNum(b.id);
+          if (diff !== 0) return diff;
+          return String(a.id || '').localeCompare(String(b.id || ''));
+        });
+      }
+
+      const ownerPalette = ['#2563eb', '#7c3aed', '#0f766e', '#b45309', '#be123c', '#4338ca', '#0e7490', '#15803d'];
+      function ownerColor(ownerId) {
+        const idx = Math.max(0, members.findIndex((m) => m.id === ownerId));
+        return ownerPalette[idx % ownerPalette.length];
+      }
+
+
       function snapshotData() { return { members, tasks }; }
 
       function saveToLocalStorage() {
+        sortTasksById();
         localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshotData()));
         lastSavedEl.textContent = `已保存：${fmtTs(Date.now())}`;
       }
@@ -271,7 +291,7 @@
           const span = Math.max(1, Math.floor((e-s)/dayMs)+1);
           return `<div class="g-row" style="grid-template-columns:${cols}">
             <div class="g-label"><strong>${t.id}</strong> ${t.title}<div class="muted">${fmt(t.start)} - ${fmt(t.end)}</div></div>
-            <div class="g-cell" style="grid-column:${start+1}/span ${span}"><div class="g-bar">${t.id}</div></div>
+            <div class="g-cell" style="grid-column:${start+1}/span ${span}"><div class="g-bar" style="background:${ownerColor(t.ownerId)}">${t.id} · ${members.find((m)=>m.id===t.ownerId)?.name || "未分配"}</div></div>
           </div>`;
         }).join('');
 
@@ -306,7 +326,7 @@
       }
 
       function bindDataControls() {
-        document.getElementById('saveNow').onclick = () => saveToLocalStorage();
+        document.getElementById('saveNow').onclick = () => { saveToLocalStorage(); render(); };
         document.getElementById('createArchive').onclick = () => createArchive();
         document.getElementById('exportDb').onclick = () => {
           const payload = { exportedAt: Date.now(), ...snapshotData(), archives: getArchives() };
@@ -347,6 +367,7 @@
       }
 
       loadFromLocalStorage();
+      sortTasksById();
       bindDataControls();
       render();
     </script>
